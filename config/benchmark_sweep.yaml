@@ -1,20 +1,22 @@
 # benchmark_sweep.yaml
 # Focused sweep: 2 dimensions, higher truncation depths
 
-path_kind: "sin"
+path_kind: "fbm"
 
 # Path lengths
-Ns: [200, 1000]
+Ns: [200, 400, 600, 800, 1000]
 
 # Dimensions: low (fast, high-m friendly) vs high (stress test)
-Ds: [2, 10]
+Ds: [2, 4, 8, 16]
 
 # Depths: skip trivial cases, go deeper
-Ms: [4, 6]
+Ms: [2, 3, 4]
 
 operations:
   - signature
   - logsignature
+  - branchedsignature_nonplanar
+  - branchedsignature_planar
 
 repeats: 5
 

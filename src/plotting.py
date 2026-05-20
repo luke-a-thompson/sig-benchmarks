@@ -268,60 +268,81 @@ def make_heatmap_plot(
     # Get unique values
     operations = sorted(set(r["operation"] for r in rows))
     libraries = sorted(set(r["library"] for r in rows))
+    depths = sorted(set(r["m"] for r in rows))
 
-    # Create a heatmap for each operation
+    # Create a heatmap for each operation/depth pair. Splitting by depth keeps
+    # the dominant runtime variation out of the color scale.
     num_ops = len(operations)
-    fig, axes = plt.subplots(1, num_ops, figsize=(8 * num_ops, 10))
-    if num_ops == 1:
-        axes = [axes]
+    num_depths = len(depths)
+    fig, axes = plt.subplots(
+        num_depths,
+        num_ops,
+        figsize=(7 * num_ops, 4.5 * num_depths),
+        squeeze=False,
+    )
 
-    for op_idx, operation in enumerate(operations):
-        ax = axes[op_idx]
+    for depth_idx, m in enumerate(depths):
+        for op_idx, operation in enumerate(operations):
+            ax = axes[depth_idx][op_idx]
 
-        # Get all unique parameter combinations for this operation
-        op_rows = [r for r in rows if r["operation"] == operation]
-        if not op_rows:
-            ax.set_visible(False)
-            continue
+            # Get all unique parameter combinations for this operation/depth
+            op_rows = [r for r in rows if r["operation"] == operation and r["m"] == m]
+            if not op_rows:
+                ax.set_visible(False)
+                continue
 
-        # Create unique combinations as row labels
-        params = sorted(set((r["N"], r["d"], r["m"]) for r in op_rows))
-        param_labels = [f"N={n}, d={d}, m={m}" for n, d, m in params]
+            # Create unique combinations as row labels
+            params = sorted(set((r["N"], r["d"]) for r in op_rows))
+            param_labels = [f"N={n}, d={d}" for n, d in params]
 
-        # Build matrix: rows = parameter combos, columns = libraries
-        matrix = np.full((len(params), len(libraries)), np.nan)
+            # Build matrix: rows = parameter combos, columns = libraries
+            matrix = np.full((len(params), len(libraries)), np.nan)
 
-        for row_idx, (N, d, m) in enumerate(params):
-            for col_idx, lib in enumerate(libraries):
-                # Find timing for this combination
-                for r in op_rows:
-                    if r["N"] == N and r["d"] == d and r["m"] == m and r["library"] == lib:
-                        matrix[row_idx, col_idx] = r["t_ms"]
-                        break
+            for row_idx, (N, d) in enumerate(params):
+                for col_idx, lib in enumerate(libraries):
+                    # Find timing for this combination
+                    for r in op_rows:
+                        if r["N"] == N and r["d"] == d and r["library"] == lib:
+                            matrix[row_idx, col_idx] = r["t_ms"]
+                            break
 
-        # Plot heatmap with log scale
-        im = ax.imshow(np.log10(matrix + 1e-6), aspect="auto", cmap="viridis", interpolation="nearest")
+            # Plot heatmap in milliseconds
+            im = ax.imshow(matrix, aspect="auto", cmap="viridis", interpolation="nearest")
 
-        # Configure axes
-        ax.set_xticks(np.arange(len(libraries)))
-        ax.set_yticks(np.arange(len(params)))
-        ax.set_xticklabels(libraries, rotation=45, ha="right")
-        ax.set_yticklabels(param_labels, fontsize=8)
+            # Configure axes
+            ax.set_xticks(np.arange(len(libraries)))
+            ax.set_yticks(np.arange(len(params)))
+            ax.set_xticklabels(libraries, rotation=45, ha="right")
+            ax.set_yticklabels(param_labels, fontsize=8)
 
-        ax.set_xlabel("Library")
-        ax.set_ylabel("Parameters")
-        ax.set_title(f"{operation} - Performance (log10 ms)")
+            ax.set_xlabel("Library")
+            ax.set_ylabel("Parameters")
+            ax.set_title(f"{operation}, m={m} - Runtime (ms)")
 
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label("log10(time in ms)")
+            # Add colorbar
+            cbar = plt.colorbar(im, ax=ax)
+            cbar.set_label("Runtime (ms)")
 
-        # Add text annotations with actual values
-        for i in range(len(params)):
-            for j in range(len(libraries)):
-                if not np.isnan(matrix[i, j]):
-                    text = ax.text(j, i, f"{matrix[i, j]:.1f}",
-                                 ha="center", va="center", color="white", fontsize=6)
+            # Add text annotations with actual values
+            finite_values = matrix[np.isfinite(matrix)]
+            threshold = (
+                (np.nanmin(finite_values) + np.nanmax(finite_values)) / 2
+                if finite_values.size
+                else 0
+            )
+            for i in range(len(params)):
+                for j in range(len(libraries)):
+                    if not np.isnan(matrix[i, j]):
+                        color = "black" if matrix[i, j] > threshold else "white"
+                        ax.text(
+                            j,
+                            i,
+                            f"{matrix[i, j]:.2g}",
+                            ha="center",
+                            va="center",
+                            color=color,
+                            fontsize=7,
+                        )
 
     fig.tight_layout()
 

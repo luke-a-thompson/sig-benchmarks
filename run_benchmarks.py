@@ -19,7 +19,7 @@ def main():
     result = subprocess.run(
         ["uv", "run", "--with", "pyyaml", "src/orchestrator.py"],
         cwd=REPO_ROOT,
-        capture_output=False,
+        capture_output=True,
     )
 
     if result.returncode != 0:
@@ -50,7 +50,7 @@ def main():
         ["uv", "run", "--with", "matplotlib", "--with", "numpy", "--with", "pyyaml",
          "src/plotting.py", str(results_csv)],
         cwd=REPO_ROOT,
-        capture_output=False,
+        capture_output=True,
     )
 
     if result.returncode != 0:

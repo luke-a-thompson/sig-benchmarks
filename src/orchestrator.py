@@ -4,11 +4,13 @@ import argparse
 import csv
 import json
 import os
+import shlex
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -41,13 +43,76 @@ def setup_run_folder(runs_dir: Path) -> Path:
     return run_dir
 
 
+def run_subprocess_streaming(
+    cmd: List[str],
+    *,
+    env: Optional[Dict[str, str]] = None,
+) -> str:
+    """
+    Run a subprocess while streaming adapter diagnostics.
+
+    Adapter stdout is also used as the machine-readable result channel, so JSON
+    result lines are captured but not echoed.
+    """
+    print(f"  command: {shlex.join(cmd)}")
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+
+    def stream_stdout() -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            stdout_lines.append(line)
+            if not line.lstrip().startswith("{"):
+                print(line, end="")
+                sys.stdout.flush()
+
+    def stream_stderr() -> None:
+        assert process.stderr is not None
+        for line in process.stderr:
+            stderr_lines.append(line)
+            print(line, end="", file=sys.stderr)
+            sys.stderr.flush()
+
+    stdout_thread = threading.Thread(target=stream_stdout)
+    stderr_thread = threading.Thread(target=stream_stderr)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    returncode = process.wait()
+    stdout_thread.join()
+    stderr_thread.join()
+
+    stdout = "".join(stdout_lines)
+    stderr = "".join(stderr_lines)
+    if returncode != 0:
+        raise subprocess.CalledProcessError(
+            returncode,
+            cmd,
+            output=stdout,
+            stderr=stderr,
+        )
+
+    return stdout
+
+
 def run_python_adapter(
     library_name: str,
     library_config: Dict[str, Any],
     task_config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Run a Python adapter using uv with dependency injection.
+    Run a Python adapter using uv with project extras.
 
     Args:
         library_name: Name of the library
@@ -58,14 +123,18 @@ def run_python_adapter(
         Benchmark result dictionary
     """
     script_path = REPO_ROOT / library_config["script"]
+    extras = list(library_config.get("extras", []))
     deps = library_config.get("deps", [])
 
-    # Build uv command with dependency injection
-    # uv run --with <dep1> --with <dep2> <script> '<json_config>'
+    # Build uv command with project optional dependencies.
+    # uv run --extra <extra1> --extra <extra2> python <script> '<json_config>'
     # Note: Adapters add src/ to sys.path themselves, so no need to inject common
     cmd = ["uv", "run"]
 
-    # Add dependencies
+    for extra in extras:
+        cmd.extend(["--extra", extra])
+
+    # Legacy support for older registry entries.
     for dep in deps:
         cmd.extend(["--with", dep])
 
@@ -74,24 +143,19 @@ def run_python_adapter(
     cmd.append(str(script_path))
     cmd.append(json.dumps(task_config))
 
-    # Execute
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        stdout = run_subprocess_streaming(cmd)
 
         # Parse JSON output from stdout
-        output_lines = result.stdout.strip().split('\n')
+        output_lines = stdout.strip().split('\n')
         for line in output_lines:
             line = line.strip()
             if line.startswith('{'):
                 return json.loads(line)
 
-        raise RuntimeError(f"No JSON output from {library_name}")
+        raise RuntimeError(
+            f"No JSON output from {library_name}. Captured stdout:\n{stdout}"
+        )
 
     except subprocess.CalledProcessError as e:
         print(f"Error running {library_name}:", file=sys.stderr)
@@ -130,20 +194,12 @@ def run_julia_adapter(
         json.dumps(task_config)
     ]
 
-    # Execute
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
+        stdout = run_subprocess_streaming(cmd, env=env)
 
         # Parse JSON output from stdout (one line per benchmark result)
         outputs: List[Dict[str, Any]] = []
-        output_lines = result.stdout.strip().split('\n')
+        output_lines = stdout.strip().split('\n')
         for line in output_lines:
             line = line.strip()
             if line.startswith('{'):
@@ -152,7 +208,9 @@ def run_julia_adapter(
         if outputs:
             return outputs
 
-        raise RuntimeError(f"No JSON output from {library_name}")
+        raise RuntimeError(
+            f"No JSON output from {library_name}. Captured stdout:\n{stdout}"
+        )
 
     except subprocess.CalledProcessError as e:
         print(f"Error running {library_name}:", file=sys.stderr)

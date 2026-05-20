@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pysiglib adapter for signature benchmarks"""
+"""stochastax adapter for signature benchmarks"""
 
 import json
 import sys
@@ -14,25 +14,47 @@ import numpy as np
 from common import BenchmarkAdapter, make_path
 
 
-class PySigLibAdapter(BenchmarkAdapter):
-    """Adapter for pysiglib library"""
+class StochastaxAdapter(BenchmarkAdapter):
+    """Adapter for stochastax library"""
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
+
         # Import here to avoid import errors if not available.
         import jax
+
         import jax.numpy as jnp
-        import pysiglib.jax_api as pysiglib
+        from stochastax.control_lifts.log_signature import compute_log_signature
+        from stochastax.control_lifts.path_signature import compute_path_signature
+        from stochastax.control_lifts.branched_signature_ito import (
+            GLHopfAlgebra,
+            MKWHopfAlgebra,
+            compute_nonplanar_branched_signature,
+            compute_planar_branched_signature,
+        )
+        from stochastax.hopf_algebras.shuffle import ShuffleHopfAlgebra
 
         self.jax = jax
         self.jnp = jnp
-        self.pysiglib = pysiglib
-        self.log_sig_method = int(config.get("log_sig_method", 2))
+        self.GLHopfAlgebra = GLHopfAlgebra
+        self.MKWHopfAlgebra = MKWHopfAlgebra
+        self.compute_log_signature = compute_log_signature
+        self.compute_nonplanar_branched_signature = compute_nonplanar_branched_signature
+        self.compute_path_signature = compute_path_signature
+        self.compute_planar_branched_signature = compute_planar_branched_signature
+        self.ShuffleHopfAlgebra = ShuffleHopfAlgebra
+        self.log_signature_type = config.get("log_signature_type", "Lyndon words")
 
     def _path_array(self, path: np.ndarray):
         """Convert path data to a contiguous JAX array during setup."""
         path_np = np.ascontiguousarray(path, dtype=np.float32)
         return self.jnp.asarray(path_np, dtype=self.jnp.float32)
+
+    def _zero_cov_increments(self, path):
+        """Create zero quadratic-variation increments for ordinary branched signatures."""
+        steps = max(int(path.shape[0]) - 1, 0)
+        dim = int(path.shape[1])
+        return self.jnp.zeros((steps, dim, dim), dtype=path.dtype)
 
     def run_signature(self, path: np.ndarray, d: int, m: int) -> Optional[Callable]:
         """
@@ -40,16 +62,15 @@ class PySigLibAdapter(BenchmarkAdapter):
 
         Returns a closure that performs only the kernel (no setup).
         """
-        # Setup phase (untimed): ensure path is contiguous and on the JAX backend
-        path = self._path_array(path)
+        path_jax = self._path_array(path)
+        hopf = self.ShuffleHopfAlgebra.build(d, m)
 
         def signature_fn(path_arg):
-            return self.pysiglib.signature(path_arg, degree=m)
+            return self.compute_path_signature(path_arg, m, hopf, mode="full").flatten()
 
         signature_fn = self.jax.jit(signature_fn)
 
-        # Return kernel closure
-        return lambda: signature_fn(path).block_until_ready()
+        return lambda: signature_fn(path_jax).block_until_ready()
 
     def run_logsignature(self, path: np.ndarray, d: int, m: int) -> Optional[Callable]:
         """
@@ -57,24 +78,22 @@ class PySigLibAdapter(BenchmarkAdapter):
 
         Returns a closure that performs only the kernel (no setup).
         """
-        # Setup phase (untimed): ensure path is contiguous and prepare cached
-        # log signature data when the selected method requires it.
-        path = self._path_array(path)
-        if self.log_sig_method in (1, 2):
-            self.pysiglib.prepare_log_sig(d, m, method=self.log_sig_method)
-        log_sig_method = self.log_sig_method
+        path_jax = self._path_array(path)
+        hopf = self.ShuffleHopfAlgebra.build(d, m)
+        log_signature_type = self.log_signature_type
 
         def logsignature_fn(path_arg):
-            return self.pysiglib.log_sig(
+            return self.compute_log_signature(
                 path_arg,
                 m,
-                method=log_sig_method,
-            )
+                hopf,
+                log_signature_type,
+                mode="full",
+            ).flatten()
 
         logsignature_fn = self.jax.jit(logsignature_fn)
 
-        # Return kernel closure
-        return lambda: logsignature_fn(path).block_until_ready()
+        return lambda: logsignature_fn(path_jax).block_until_ready()
 
     def run_sigdiff(self, path: np.ndarray, d: int, m: int) -> Optional[Callable]:
         """
@@ -82,17 +101,16 @@ class PySigLibAdapter(BenchmarkAdapter):
 
         Returns a closure that performs only the kernel (no setup).
         """
-        # Setup phase (untimed): ensure path is contiguous and on the JAX backend
-        path = self._path_array(path)
+        path_jax = self._path_array(path)
+        hopf = self.ShuffleHopfAlgebra.build(d, m)
 
         def loss_fn(path_arg):
-            sig = self.pysiglib.signature(path_arg, degree=m)
+            sig = self.compute_path_signature(path_arg, m, hopf, mode="full").flatten()
             return self.jnp.sum(sig)
 
         grad_fn = self.jax.jit(self.jax.grad(loss_fn))
 
-        # Return kernel closure that computes signature + backprop
-        return lambda: grad_fn(path).block_until_ready()
+        return lambda: grad_fn(path_jax).block_until_ready()
 
     def run_branchedsignature(
         self,
@@ -107,17 +125,36 @@ class PySigLibAdapter(BenchmarkAdapter):
 
         Returns a closure that performs only the kernel (no setup).
         """
-        # Setup phase (untimed): ensure path is contiguous and prepare cached
-        # tree/coproduct data for the selected planar convention.
-        path = self._path_array(path)
-        self.pysiglib.prepare_branched_sig(d, m, planar=planar)
+        path_jax = self._path_array(path)
+        cov_increments = self._zero_cov_increments(path_jax)
 
-        def branchedsignature_fn(path_arg):
-            return self.pysiglib.branched_sig(path_arg, degree=m, planar=planar)
+        if planar:
+            hopf = self.MKWHopfAlgebra.build(d, m)
+
+            def branchedsignature_fn(path_arg, cov_arg):
+                return self.compute_planar_branched_signature(
+                    path_arg,
+                    m,
+                    hopf,
+                    "full",
+                    cov_arg,
+                ).flatten()
+
+        else:
+            hopf = self.GLHopfAlgebra.build(d, m)
+
+            def branchedsignature_fn(path_arg, cov_arg):
+                return self.compute_nonplanar_branched_signature(
+                    path_arg,
+                    m,
+                    hopf,
+                    "full",
+                    cov_arg,
+                ).flatten()
 
         branchedsignature_fn = self.jax.jit(branchedsignature_fn)
 
-        return lambda: branchedsignature_fn(path).block_until_ready()
+        return lambda: branchedsignature_fn(path_jax, cov_increments).block_until_ready()
 
     def _run_benchmark(self) -> Optional[Dict[str, Any]]:
         """Execute the benchmark"""
@@ -127,19 +164,19 @@ class PySigLibAdapter(BenchmarkAdapter):
         # Select operation
         if self.operation == "signature":
             kernel = self.run_signature(path, self.d, self.m)
-            method = "signature"
+            method = "compute_path_signature"
         elif self.operation == "logsignature":
             kernel = self.run_logsignature(path, self.d, self.m)
-            method = f"log_sig(method={self.log_sig_method})"
+            method = f"compute_log_signature({self.log_signature_type})"
         elif self.operation == "sigdiff":
             kernel = self.run_sigdiff(path, self.d, self.m)
-            method = "jax.grad(signature)"
+            method = "jax.grad(compute_path_signature)"
         elif self.operation in ("branchedsignature", "branchedsignature_nonplanar"):
             kernel = self.run_branchedsignature(path, self.d, self.m, planar=False)
-            method = "branched_sig(planar=False)"
+            method = "compute_nonplanar_branched_signature"
         elif self.operation == "branchedsignature_planar":
             kernel = self.run_branchedsignature(path, self.d, self.m, planar=True)
-            method = "branched_sig(planar=True)"
+            method = "compute_planar_branched_signature"
         else:
             # Operation not supported
             return None
@@ -154,21 +191,21 @@ class PySigLibAdapter(BenchmarkAdapter):
         return self.output_result(
             t_ms=t_ms,
             alloc_bytes=alloc_bytes,
-            library="pysiglib",
+            library="stochastax",
             method=method,
             path_type="jax.Array",
-            language="python"
+            language="python",
         )
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: run_pysiglib.py '<json_config>'", file=sys.stderr)
+        print("Usage: run_stochastax.py '<json_config>'", file=sys.stderr)
         sys.exit(1)
 
     # Parse configuration from command line
     config = json.loads(sys.argv[1])
 
     # Create and run adapter
-    adapter = PySigLibAdapter(config)
+    adapter = StochastaxAdapter(config)
     adapter.run()

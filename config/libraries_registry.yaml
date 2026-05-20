@@ -2,42 +2,53 @@
 # Registry of adapters and their dependencies
 
 libraries:
-  iisignature:
-    type: python
-    script: "adapters/python/run_iisignature.py"
-    deps:
-      - iisignature
-      - numpy
-    operations:
-      - signature
-      - logsignature
+  # iisignature:
+  #   type: python
+  #   script: "adapters/python/run_iisignature.py"
+  #   extras:
+  #     - iisignature
+  #   operations:
+  #     - signature
+  #     - logsignature
 
   pysiglib:
     type: python
     script: "adapters/python/run_pysiglib.py"
-    deps:
+    extras:
       - pysiglib
-      - numpy
     operations:
       - signature
+      - logsignature
       - sigdiff
+      - branchedsignature_nonplanar
+      - branchedsignature_planar
 
-  chen-signatures:
+  stochastax:
     type: python
-    script: "adapters/python/run_chen.py"
-    deps:
-      - chen-signatures
-      - numpy
-      - torch  # Required for sigdiff
+    script: "adapters/python/run_stochastax.py"
+    extras:
+      - stochastax
     operations:
       - signature
       - logsignature
       - sigdiff
+      - branchedsignature_nonplanar
+      - branchedsignature_planar
 
-  ChenSignatures.jl:
-    type: julia
-    dir: "adapters/julia"
-    script: "run_chen.jl"
-    operations:
-      - signature
-      - logsignature
+  # chen-signatures:
+  #   type: python
+  #   script: "adapters/python/run_chen.py"
+  #   extras:
+  #     - chen-signatures
+  #   operations:
+  #     - signature
+  #     - logsignature
+  #     - sigdiff
+
+  # ChenSignatures.jl:
+  #   type: julia
+  #   dir: "adapters/julia"
+  #   script: "run_chen.jl"
+  #   operations:
+  #     - signature
+  #     - logsignature

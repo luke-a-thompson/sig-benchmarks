@@ -1,6 +1,8 @@
 """Path generation utilities"""
 
 import math
+from typing import Literal
+
 import numpy as np
 
 
@@ -41,22 +43,45 @@ def make_path_sin(d: int, N: int) -> np.ndarray:
     return path
 
 
-def make_path(d: int, N: int, kind: str) -> np.ndarray:
+def make_path_fbm(d: int, N: int, hurst: float = 0.33) -> np.ndarray:
+    """
+    Generate a fractional Brownian motion: [X_1, X_2, ...]
+
+    Args:
+        d: Dimension of the path
+        N: Number of points
+
+    Returns:
+        Array of shape (N, d)
+    """
+    from fbm import fbm
+
+    path = np.stack(
+        [fbm(n=N - 1, hurst=hurst, length=1, method="daviesharte") for _ in range(d)],
+        axis=-1,
+    )
+    return path
+
+
+def make_path(d: int, N: int, kind: Literal["linear", "sin", "fbm"]) -> np.ndarray:
     """
     Generate path of specified kind.
 
     Args:
         d: Dimension of the path
         N: Number of points
-        kind: "linear" or "sin"
+        kind: "linear", "sin", or "fbm"
 
     Returns:
         Array of shape (N, d)
     """
     kind = kind.lower()
+
     if kind == "linear":
         return make_path_linear(d, N)
     elif kind == "sin":
         return make_path_sin(d, N)
+    elif kind == "fbm":
+        return make_path_fbm(d, N)
     else:
         raise ValueError(f"Unknown path_kind: {kind}")

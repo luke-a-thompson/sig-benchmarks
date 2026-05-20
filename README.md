@@ -15,7 +15,8 @@ This benchmark suite uses an **Orchestrator-Adapter** architecture to ensure fai
 ## Libraries Benchmarked
 
 - **iisignature** (Python, industry standard)
-- **pysiglib** (Python, PyTorch-based)
+- **pysiglib** (Python, JAX API)
+- **stochastax** (Python/JAX)
 - **chen-signatures** (Python, with autodiff support)
 - **ChenSignatures.jl** (Julia)
 
@@ -24,7 +25,7 @@ This benchmark suite uses an **Orchestrator-Adapter** architecture to ensure fai
 - **Strict Isolation**: Each library runs in its own ephemeral environment
 - **Methodological Fairness**: Identical manual timing loops across all languages
 - **Setup/Kernel Separation**: Only the computation is timed, not data preparation
-- **Multiple Operations**: signature, logsignature, sigdiff (autodiff)
+- **Multiple Operations**: signature, logsignature, branched signatures, sigdiff (autodiff)
 - **Scaling Analysis**: Varies N (path length), d (dimension), m (signature level)
 
 ## Latest Public Run (2025-12-02)
@@ -101,7 +102,7 @@ uv run src/plotting.py --list-plots
 The plotting tool generates multiple visualization types:
 
 - **`line`** - Original 3×3 grid of line plots showing absolute performance
-- **`heatmap`** - Complete performance landscape across all parameter combinations (log scale)
+- **`heatmap`** - Complete performance landscape across all parameter combinations in milliseconds
 - **`speedup`** - Relative performance showing speedup vs baseline (default: slowest library)
 - **`profile`** - Performance profile showing how often each library is competitive
 - **`box`** - Distribution of performance across all benchmarks with outliers
@@ -197,6 +198,8 @@ operations:
   - signature
   - logsignature
   - sigdiff
+  - branchedsignature_nonplanar
+  - branchedsignature_planar
 
 repeats: 10                    # Timing loop iterations
 runs_dir: "runs"
@@ -239,8 +242,9 @@ N,d,m,path_kind,operation,language,library,method,path_type,t_ms
 
 **Columns:**
 - `N`, `d`, `m`: Problem parameters (path length, dimension, signature level)
-- `path_kind`: Path generator type (`linear` or `sin`)
-- `operation`: Operation type (`signature`, `logsignature`, or `sigdiff`)
+- `path_kind`: Path generator type (`linear`, `sin`, or `fbm`)
+- `operation`: Operation type (`signature`, `logsignature`, `sigdiff`,
+  `branchedsignature_nonplanar`, or `branchedsignature_planar`)
 - `language`: `julia` or `python`
 - `library`: Implementation name
 - `method`: Specific method/function called
@@ -339,7 +343,8 @@ def run_signature(self, path, d, m):
 - Lower lines = faster performance
 
 **Heatmap (`plot_heatmap.png`):**
-- Shows ALL parameter combinations at once
+- Splits panels by operation and signature depth
+- Rows show N/d combinations for a fixed depth
 - Darker colors (blue/purple) = faster
 - Lighter colors (yellow) = slower
 - Numbers show actual milliseconds

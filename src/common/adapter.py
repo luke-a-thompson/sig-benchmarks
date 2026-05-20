@@ -29,8 +29,9 @@ class BenchmarkAdapter:
                 - N: Number of path points
                 - d: Dimension
                 - m: Signature truncation level
-                - path_kind: "linear" or "sin"
-                - operation: "signature", "logsignature", or "sigdiff"
+                - path_kind: "linear", "sin", or "fbm"
+                - operation: "signature", "logsignature", "sigdiff",
+                  "branchedsignature_nonplanar", or "branchedsignature_planar"
                 - repeats: Number of timing repetitions
         """
         self.config = config
@@ -136,6 +137,32 @@ class BenchmarkAdapter:
 
         Returns:
             Callable that performs the sigdiff computation, or None if not supported
+        """
+        return None  # Default: not supported
+
+    def run_branchedsignature(
+        self,
+        path,
+        d: int,
+        m: int,
+        *,
+        planar: bool,
+    ) -> Optional[Callable]:
+        """
+        Prepare and return kernel for branched signature computation.
+
+        This method should be overridden by subclasses to return a callable
+        that performs only the kernel computation (no setup).
+
+        Args:
+            path: The input path (format depends on library)
+            d: Dimension
+            m: Signature level
+            planar: Whether to compute planar rather than non-planar trees
+
+        Returns:
+            Callable that performs the branched signature computation, or None
+            if not supported
         """
         return None  # Default: not supported
 

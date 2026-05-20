@@ -1,7 +1,7 @@
 """Common utilities for signature benchmark suite"""
 
-from .paths import make_path_linear, make_path_sin, make_path
 from .adapter import BenchmarkAdapter
+from .paths import make_path, make_path_linear, make_path_sin
 
 __all__ = [
     "make_path_linear",

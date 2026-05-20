@@ -1,18 +1,39 @@
 [project]
 name = "sig-benchmarks"
 version = "0.1.0"
-requires-python = ">=3.9, <3.10"
+requires-python = ">=3.12, <3.13"
 dependencies = [
     "pyyaml>=6.0.3",
     "matplotlib>=3.9.4",
-    "numpy<2",
+    "numpy",
+    "fbm>=0.3.0",
 ]
 
-# Optional: Install all benchmark libraries
 [project.optional-dependencies]
-all = [
+chen-signatures = [
     "chen-signatures==0.2.4",
-    "iisignature",
-    "pysiglib",
     "torch",
 ]
+# iisignature = [
+#     "iisignature",
+#     "numpy<2",
+# ]
+pysiglib = [
+    "pysiglib[cuda]>=3.0.3",
+]
+stochastax = [
+    "jax[cuda]",
+    "stochastax",
+]
+all = [
+    "chen-signatures==0.2.4",
+    # "iisignature",
+    "fbm>=0.3.0",
+    "jax[cuda]",
+    "pysiglib[cuda]>=3.0.3",
+    "stochastax",
+    "torch",
+]
+
+[tool.uv.sources]
+stochastax = { git = "https://github.com/luke-a-thompson/Stochastax.git", branch = "ArbitraryDepthBranchedRP" }
