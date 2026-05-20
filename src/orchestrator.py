@@ -106,10 +106,38 @@ def run_subprocess_streaming(
     return stdout
 
 
+def backend_variants(library_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Return backend variants for a library.
+
+    A missing backend list keeps existing registry entries as a single default
+    run. Entries may set a label and environment variables, e.g.
+    {"name": "cpu", "env": {"JAX_PLATFORM_NAME": "cpu"}}.
+    """
+    variants = library_config.get("backends")
+    if not variants:
+        backend = library_config.get("backend", "")
+        env = library_config.get("env", {})
+        return [{"name": backend, "env": env}]
+
+    normalized = []
+    for variant in variants:
+        if isinstance(variant, str):
+            normalized.append({"name": variant, "env": {}})
+        else:
+            normalized.append({
+                "name": variant.get("name", ""),
+                "env": variant.get("env", {}),
+            })
+    return normalized
+
+
 def run_python_adapter(
     library_name: str,
     library_config: Dict[str, Any],
-    task_config: Dict[str, Any]
+    task_config: Dict[str, Any],
+    *,
+    env_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Run a Python adapter using uv with project extras.
@@ -144,7 +172,11 @@ def run_python_adapter(
     cmd.append(json.dumps(task_config))
 
     try:
-        stdout = run_subprocess_streaming(cmd)
+        env = os.environ.copy()
+        if env_overrides:
+            env.update({key: str(value) for key, value in env_overrides.items()})
+
+        stdout = run_subprocess_streaming(cmd, env=env)
 
         # Parse JSON output from stdout
         output_lines = stdout.strip().split('\n')
@@ -167,7 +199,9 @@ def run_python_adapter(
 def run_julia_adapter(
     library_name: str,
     library_config: Dict[str, Any],
-    task_config: Dict[str, Any]
+    task_config: Dict[str, Any],
+    *,
+    env_overrides: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Run a Julia adapter with project environment.
@@ -187,6 +221,8 @@ def run_julia_adapter(
     # JULIA_PROJECT=<dir> julia <script> '<json_config>'
     env = os.environ.copy()
     env["JULIA_PROJECT"] = str(julia_dir)
+    if env_overrides:
+        env.update({key: str(value) for key, value in env_overrides.items()})
 
     cmd = [
         "julia",
@@ -239,6 +275,9 @@ def run_orchestrator(config_path: Path = None):
     Ms = sweep.get("Ms", [2, 3, 4])
     path_kind = sweep.get("path_kind", "sin")
     operations = sweep.get("operations", ["signature", "logsignature"])
+    selected_backends = sweep.get("backends")
+    if selected_backends is not None:
+        selected_backends = {str(backend) for backend in selected_backends}
     repeats = sweep.get("repeats", 10)
     runs_dir = REPO_ROOT / sweep.get("runs_dir", "runs")
 
@@ -263,6 +302,8 @@ def run_orchestrator(config_path: Path = None):
     print(f"Ds: {Ds}")
     print(f"Ms: {Ms}")
     print(f"Operations: {operations}")
+    if selected_backends is not None:
+        print(f"Backends: {sorted(selected_backends)}")
     print(f"Repeats: {repeats}")
     print(f"Libraries: {list(registry.get('libraries', {}).keys())}")
     print("=" * 60)
@@ -272,56 +313,81 @@ def run_orchestrator(config_path: Path = None):
     libraries = registry.get("libraries", {})
 
     # Run benchmarks
-    total_tasks = len(Ns) * len(Ds) * len(Ms) * len(operations) * len(libraries)
+    library_backends = {
+        name: [
+            backend
+            for backend in backend_variants(config)
+            if selected_backends is None or backend.get("name", "") in selected_backends
+        ]
+        for name, config in libraries.items()
+    }
+    backend_task_count = sum(len(backends) for backends in library_backends.values())
+    total_tasks = len(Ns) * len(Ds) * len(Ms) * len(operations) * backend_task_count
     current_task = 0
 
     for library_name, library_config in libraries.items():
         lib_operations = set(library_config.get("operations", []))
+        backends = library_backends[library_name]
 
-        for N in Ns:
-            for d in Ds:
-                for m in Ms:
-                    for operation in operations:
-                        current_task += 1
+        for backend in backends:
+            backend_name = backend.get("name", "")
+            backend_suffix = f"[{backend_name}]" if backend_name else ""
 
-                        # Skip if library doesn't support this operation
-                        if operation not in lib_operations:
-                            print(f"[{current_task}/{total_tasks}] Skipping {library_name}.{operation} (not supported)")
-                            continue
+            for N in Ns:
+                for d in Ds:
+                    for m in Ms:
+                        for operation in operations:
+                            current_task += 1
 
-                        print(f"[{current_task}/{total_tasks}] Running {library_name}.{operation} (N={N}, d={d}, m={m})")
-
-                        # Prepare task configuration
-                        task_config = {
-                            "N": N,
-                            "d": d,
-                            "m": m,
-                            "path_kind": path_kind,
-                            "operation": operation,
-                            "repeats": repeats,
-                        }
-
-                        # Run adapter based on type
-                        try:
-                            if library_config["type"] == "python":
-                                result = run_python_adapter(library_name, library_config, task_config)
-                            elif library_config["type"] == "julia":
-                                result = run_julia_adapter(library_name, library_config, task_config)
-                            else:
-                                print(f"Unknown library type: {library_config['type']}", file=sys.stderr)
+                            # Skip if library doesn't support this operation
+                            if operation not in lib_operations:
+                                print(f"[{current_task}/{total_tasks}] Skipping {library_name}{backend_suffix}.{operation} (not supported)")
                                 continue
 
-                            if result is None:
+                            print(f"[{current_task}/{total_tasks}] Running {library_name}{backend_suffix}.{operation} (N={N}, d={d}, m={m})")
+
+                            # Prepare task configuration
+                            task_config = {
+                                "N": N,
+                                "d": d,
+                                "m": m,
+                                "path_kind": path_kind,
+                                "operation": operation,
+                                "repeats": repeats,
+                                "backend": backend_name,
+                            }
+
+                            # Run adapter based on type
+                            try:
+                                if library_config["type"] == "python":
+                                    result = run_python_adapter(
+                                        library_name,
+                                        library_config,
+                                        task_config,
+                                        env_overrides=backend.get("env", {}),
+                                    )
+                                elif library_config["type"] == "julia":
+                                    result = run_julia_adapter(
+                                        library_name,
+                                        library_config,
+                                        task_config,
+                                        env_overrides=backend.get("env", {}),
+                                    )
+                                else:
+                                    print(f"Unknown library type: {library_config['type']}", file=sys.stderr)
+                                    continue
+
+                                if result is None:
+                                    continue
+
+                                if isinstance(result, list):
+                                    all_results.extend(result)
+                                else:
+                                    all_results.append(result)
+
+                            except Exception as e:
+                                print(f"Failed: {e}", file=sys.stderr)
                                 continue
-
-                            if isinstance(result, list):
-                                all_results.extend(result)
-                            else:
-                                all_results.append(result)
-
-                        except Exception as e:
-                            print(f"Failed: {e}", file=sys.stderr)
-                            continue
 
     # Write results to CSV
     csv_path = run_dir / "results.csv"
@@ -331,6 +397,7 @@ def run_orchestrator(config_path: Path = None):
         "m",
         "path_kind",
         "operation",
+        "backend",
         "language",
         "library",
         "method",

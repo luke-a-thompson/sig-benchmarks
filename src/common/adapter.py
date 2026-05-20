@@ -33,6 +33,7 @@ class BenchmarkAdapter:
                 - operation: "signature", "logsignature", "sigdiff",
                   "branchedsignature_nonplanar", or "branchedsignature_planar"
                 - repeats: Number of timing repetitions
+                - backend: Optional backend label, e.g. "cpu" or "gpu"
         """
         self.config = config
         self.N = config["N"]
@@ -41,6 +42,7 @@ class BenchmarkAdapter:
         self.path_kind = config["path_kind"]
         self.operation = config["operation"]
         self.repeats = config["repeats"]
+        self.backend = config.get("backend", "")
 
     def manual_timing_loop(
         self,
@@ -226,6 +228,7 @@ class BenchmarkAdapter:
             "m": self.m,
             "path_kind": self.path_kind,
             "operation": self.operation,
+            "backend": self.backend,
             "language": language,
             "library": library,
             "method": method,

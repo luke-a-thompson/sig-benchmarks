@@ -14,16 +14,24 @@ chen-signatures = [
     "chen-signatures==0.2.4",
     "torch",
 ]
-# iisignature = [
-#     "iisignature",
-#     "numpy<2",
-# ]
+iisignature = [
+    "iisignature",
+    "numpy"
+]
 pysiglib = [
     "pysiglib[cuda]>=3.0.3",
 ]
 stochastax = [
     "jax[cuda]",
     "stochastax",
+]
+signax = [
+    "jax[cuda]",
+    "signax",
+]
+keras-sig = [
+    "jax[cuda]",
+    "keras_sig",
 ]
 all = [
     "chen-signatures==0.2.4",
@@ -32,8 +40,15 @@ all = [
     "jax[cuda]",
     "pysiglib[cuda]>=3.0.3",
     "stochastax",
+    "signax",
+    "keras_sig",
     "torch",
 ]
 
 [tool.uv.sources]
 stochastax = { git = "https://github.com/luke-a-thompson/Stochastax.git", branch = "ArbitraryDepthBranchedRP" }
+keras_sig = { git = "https://github.com/remigenet/keras_sig.git" }
+signax = { git = "https://github.com/anh-tong/signax" }
+
+[tool.uv.extra-build-dependencies]
+iisignature = ["numpy"]

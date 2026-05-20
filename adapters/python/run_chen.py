@@ -3,8 +3,37 @@
 
 import json
 import sys
+import ctypes
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+
+def _preload_julia_libstdcxx() -> None:
+    """
+    Prefer Julia's bundled libstdc++ before importing juliacall-backed chen.
+
+    Older Linux distributions can have a system libstdc++ that is too old for
+    juliaup's Julia build. Loading Julia's copy first avoids a process-wide
+    LD_LIBRARY_PATH requirement for this adapter.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+
+    juliaup_dir = Path.home() / ".julia" / "juliaup"
+    candidates = sorted(
+        juliaup_dir.glob("julia-*/lib/julia/libstdc++.so.6"),
+        reverse=True,
+    )
+
+    for candidate in candidates:
+        try:
+            ctypes.CDLL(str(candidate), mode=ctypes.RTLD_GLOBAL)
+            return
+        except OSError:
+            continue
+
+
+_preload_julia_libstdcxx()
 
 # Add src directory to path for common module
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

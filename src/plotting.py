@@ -31,6 +31,7 @@ def load_results(csv_path: Path) -> List[Dict[str, Any]]:
                 "m": int(row["m"]),
                 "path_kind": row["path_kind"].strip(),
                 "operation": row["operation"].strip(),
+                "backend": row.get("backend", "").strip(),
                 "language": row.get("language", "").strip(),
                 "library": row["library"].strip(),
                 "method": row.get("method", "").strip(),
@@ -267,82 +268,102 @@ def make_heatmap_plot(
 
     # Get unique values
     operations = sorted(set(r["operation"] for r in rows))
-    libraries = sorted(set(r["library"] for r in rows))
     depths = sorted(set(r["m"] for r in rows))
+    backends = sorted(set(r.get("backend", "") for r in rows))
 
-    # Create a heatmap for each operation/depth pair. Splitting by depth keeps
-    # the dominant runtime variation out of the color scale.
+    # Create a heatmap for each operation/depth/backend tuple. Splitting by
+    # backend keeps CPU and GPU comparisons in separate panels.
     num_ops = len(operations)
     num_depths = len(depths)
+    num_backends = len(backends)
     fig, axes = plt.subplots(
-        num_depths,
+        num_depths * num_backends,
         num_ops,
-        figsize=(7 * num_ops, 4.5 * num_depths),
+        figsize=(7 * num_ops, 4.5 * num_depths * num_backends),
         squeeze=False,
     )
 
     for depth_idx, m in enumerate(depths):
-        for op_idx, operation in enumerate(operations):
-            ax = axes[depth_idx][op_idx]
+        for backend_idx, backend in enumerate(backends):
+            axis_row = depth_idx * num_backends + backend_idx
+            backend_title = f", backend={backend}" if backend else ""
 
-            # Get all unique parameter combinations for this operation/depth
-            op_rows = [r for r in rows if r["operation"] == operation and r["m"] == m]
-            if not op_rows:
-                ax.set_visible(False)
-                continue
+            for op_idx, operation in enumerate(operations):
+                ax = axes[axis_row][op_idx]
 
-            # Create unique combinations as row labels
-            params = sorted(set((r["N"], r["d"]) for r in op_rows))
-            param_labels = [f"N={n}, d={d}" for n, d in params]
+                # Get all unique parameter combinations for this operation/depth/backend
+                op_rows = [
+                    r
+                    for r in rows
+                    if (
+                        r["operation"] == operation
+                        and r["m"] == m
+                        and r.get("backend", "") == backend
+                    )
+                ]
+                if not op_rows:
+                    ax.set_visible(False)
+                    continue
 
-            # Build matrix: rows = parameter combos, columns = libraries
-            matrix = np.full((len(params), len(libraries)), np.nan)
+                libraries = sorted(set(r["library"] for r in op_rows))
 
-            for row_idx, (N, d) in enumerate(params):
-                for col_idx, lib in enumerate(libraries):
-                    # Find timing for this combination
-                    for r in op_rows:
-                        if r["N"] == N and r["d"] == d and r["library"] == lib:
-                            matrix[row_idx, col_idx] = r["t_ms"]
-                            break
+                # Create unique combinations as row labels
+                params = sorted(set((r["N"], r["d"]) for r in op_rows))
+                param_labels = [f"N={n}, d={d}" for n, d in params]
 
-            # Plot heatmap in milliseconds
-            im = ax.imshow(matrix, aspect="auto", cmap="viridis", interpolation="nearest")
+                # Build matrix: rows = parameter combos, columns = libraries
+                matrix = np.full((len(params), len(libraries)), np.nan)
 
-            # Configure axes
-            ax.set_xticks(np.arange(len(libraries)))
-            ax.set_yticks(np.arange(len(params)))
-            ax.set_xticklabels(libraries, rotation=45, ha="right")
-            ax.set_yticklabels(param_labels, fontsize=8)
+                for row_idx, (N, d) in enumerate(params):
+                    for col_idx, lib in enumerate(libraries):
+                        # Find timing for this combination
+                        for r in op_rows:
+                            if r["N"] == N and r["d"] == d and r["library"] == lib:
+                                matrix[row_idx, col_idx] = r["t_ms"]
+                                break
 
-            ax.set_xlabel("Library")
-            ax.set_ylabel("Parameters")
-            ax.set_title(f"{operation}, m={m} - Runtime (ms)")
+                # Plot heatmap in milliseconds
+                im = ax.imshow(
+                    matrix,
+                    aspect="auto",
+                    cmap="viridis",
+                    interpolation="nearest",
+                )
 
-            # Add colorbar
-            cbar = plt.colorbar(im, ax=ax)
-            cbar.set_label("Runtime (ms)")
+                # Configure axes
+                ax.set_xticks(np.arange(len(libraries)))
+                ax.set_yticks(np.arange(len(params)))
+                ax.set_xticklabels(libraries, rotation=45, ha="right")
+                ax.set_yticklabels(param_labels, fontsize=8)
 
-            # Add text annotations with actual values
-            finite_values = matrix[np.isfinite(matrix)]
-            threshold = (
-                (np.nanmin(finite_values) + np.nanmax(finite_values)) / 2
-                if finite_values.size
-                else 0
-            )
-            for i in range(len(params)):
-                for j in range(len(libraries)):
-                    if not np.isnan(matrix[i, j]):
-                        color = "black" if matrix[i, j] > threshold else "white"
-                        ax.text(
-                            j,
-                            i,
-                            f"{matrix[i, j]:.2g}",
-                            ha="center",
-                            va="center",
-                            color=color,
-                            fontsize=7,
-                        )
+                ax.set_xlabel("Library")
+                ax.set_ylabel("Parameters")
+                ax.set_title(f"{operation}, m={m}{backend_title} - Runtime (ms)")
+
+                # Add colorbar
+                cbar = plt.colorbar(im, ax=ax)
+                cbar.set_label("Runtime (ms)")
+
+                # Add text annotations with actual values
+                finite_values = matrix[np.isfinite(matrix)]
+                threshold = (
+                    (np.nanmin(finite_values) + np.nanmax(finite_values)) / 2
+                    if finite_values.size
+                    else 0
+                )
+                for i in range(len(params)):
+                    for j in range(len(libraries)):
+                        if not np.isnan(matrix[i, j]):
+                            color = "black" if matrix[i, j] > threshold else "white"
+                            ax.text(
+                                j,
+                                i,
+                                f"{matrix[i, j]:.2g}",
+                                ha="center",
+                                va="center",
+                                color=color,
+                                fontsize=7,
+                            )
 
     fig.tight_layout()
 

@@ -63,12 +63,14 @@ class PySigLibAdapter(BenchmarkAdapter):
         if self.log_sig_method in (1, 2):
             self.pysiglib.prepare_log_sig(d, m, method=self.log_sig_method)
         log_sig_method = self.log_sig_method
+        use_scalar_term = log_sig_method in (1, 2)
 
         def logsignature_fn(path_arg):
             return self.pysiglib.log_sig(
                 path_arg,
                 m,
                 method=log_sig_method,
+                scalar_term=use_scalar_term,
             )
 
         logsignature_fn = self.jax.jit(logsignature_fn)

@@ -4,19 +4,25 @@
 path_kind: "fbm"
 
 # Path lengths
-Ns: [200, 400, 600, 800, 1000]
+Ns: [200, 400, 800]
 
 # Dimensions: low (fast, high-m friendly) vs high (stress test)
 Ds: [2, 4, 8, 16]
 
 # Depths: skip trivial cases, go deeper
-Ms: [2, 3, 4]
+Ms: [2, 3]
 
 operations:
   - signature
   - logsignature
   - branchedsignature_nonplanar
   - branchedsignature_planar
+
+# Backend labels defined per library in libraries_registry.yaml.
+# Use [cpu], [gpu], or [cpu, gpu] to choose the experiment scope.
+backends:
+  - cpu
+  - gpu
 
 repeats: 5
 

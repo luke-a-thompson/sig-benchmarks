@@ -16,6 +16,13 @@ libraries:
     script: "adapters/python/run_pysiglib.py"
     extras:
       - pysiglib
+    backends:
+      - name: cpu
+        env:
+          JAX_PLATFORM_NAME: cpu
+      - name: gpu
+        env:
+          JAX_PLATFORM_NAME: gpu
     operations:
       - signature
       - logsignature
@@ -28,6 +35,13 @@ libraries:
     script: "adapters/python/run_stochastax.py"
     extras:
       - stochastax
+    backends:
+      - name: cpu
+        env:
+          JAX_PLATFORM_NAME: cpu
+      - name: gpu
+        env:
+          JAX_PLATFORM_NAME: gpu
     operations:
       - signature
       - logsignature
@@ -35,15 +49,49 @@ libraries:
       - branchedsignature_nonplanar
       - branchedsignature_planar
 
-  # chen-signatures:
-  #   type: python
-  #   script: "adapters/python/run_chen.py"
-  #   extras:
-  #     - chen-signatures
-  #   operations:
-  #     - signature
-  #     - logsignature
-  #     - sigdiff
+  signax:
+    type: python
+    script: "adapters/python/run_signax.py"
+    extras:
+      - signax
+    backends:
+      - name: cpu
+        env:
+          JAX_PLATFORM_NAME: cpu
+      - name: gpu
+        env:
+          JAX_PLATFORM_NAME: gpu
+    operations:
+      - signature
+      - logsignature
+      - sigdiff
+
+  keras_sig:
+    type: python
+    script: "adapters/python/run_keras_sig.py"
+    extras:
+      - keras-sig
+    backends:
+      - name: cpu
+        env:
+          JAX_PLATFORM_NAME: cpu
+      - name: gpu
+        env:
+          JAX_PLATFORM_NAME: gpu
+    operations:
+      - signature
+      - sigdiff
+
+  chen-signatures:
+    type: python
+    script: "adapters/python/run_chen.py"
+    extras:
+      - chen-signatures
+    backend: cpu
+    operations:
+      - signature
+      - logsignature
+      - sigdiff
 
   # ChenSignatures.jl:
   #   type: julia
